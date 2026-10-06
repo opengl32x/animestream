@@ -3,7 +3,7 @@ import type { ShikimoriAnime, ShikimoriScreenshot, ShikimoriCharacter, AgeRating
 // Запросы идут через Vercel Rewrite (/api/shikimori из vercel.json)
 const PROXY_BASE = '/api/shikimori';
 const SHIKIMORI_IMG = 'https://shikimori.one';
-const KODIK_PLAYER_BASE = 'https://kodik.cc/players/player?shikimori_id=';
+const KODIK_PLAYER_BASE = 'https://kodik.info/find-player?shikimoriID=';
 
 // Пауза между запросами, чтобы не словить 429
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -71,8 +71,10 @@ export async function fetchAnimes(params: {
   const query: Record<string, string | string[] | undefined> = {
     page: String(params.page ?? 1),
     limit: String(params.limit ?? 20),
-    order: params.order ?? 'popularity',
   };
+  // При поиске не задаём order, чтобы Shikimori сортировал по релевантности
+  if (params.order) query.order = params.order;
+  else if (!params.search) query.order = 'popularity';
   if (params.kind) query.kind = params.kind;
   if (params.status) query.status = params.status;
   if (params.season) query.season = params.season;
@@ -146,11 +148,25 @@ export async function fetchHomeData(): Promise<{
     fetchSeasonal(),
     fetchPopular(),
   ]);
+  if (top.status === 'rejected' && seasonal.status === 'rejected' && popular.status === 'rejected') {
+    throw new Error('Не удалось загрузить данные');
+  }
   return {
     top: top.status === 'fulfilled' ? top.value : [],
     seasonal: seasonal.status === 'fulfilled' ? seasonal.value : [],
     popular: popular.status === 'fulfilled' ? popular.value : [],
   };
+}
+
+// Запасная обложка из MyAnimeList (ID Shikimori совпадает с ID MAL)
+export async function fetchFallbackPoster(id: number): Promise<string> {
+  try {
+    const r = await fetch(`https://api.jikan.moe/v4/anime/${id}`);
+    const j = await r.json();
+    return j.data?.images?.jpg?.large_image_url ?? '';
+  } catch {
+    return '';
+  }
 }
 
 export const AGE_RATINGS: { value: AgeRating; label: string; }[] = [
