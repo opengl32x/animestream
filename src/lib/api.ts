@@ -5,6 +5,9 @@ const PROXY_BASE = '/api/shikimori';
 const SHIKIMORI_IMG = 'https://shikimori.one';
 const KODIK_PLAYER_BASE = 'https://kodik.cc/players/player?shikimori_id=';
 
+// Вспомогательная функция задержки для предотвращения ошибки 429
+const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
 async function shikimoriFetch(path: string, params?: Record<string, string | string[] | undefined>): Promise<unknown> {
   const url = new URL(PROXY_BASE + path, window.location.origin);
   if (params) {
@@ -18,7 +21,6 @@ async function shikimoriFetch(path: string, params?: Record<string, string | str
     }
   }
 
-  // Убираем заголовки (User-Agent и Content-Type), так как Vercel сам проксирует запрос
   const resp = await fetch(url.toString());
 
   if (!resp.ok) {
@@ -98,27 +100,23 @@ export async function fetchTopScore(): Promise<ShikimoriAnime[]> {
   const data = await shikimoriFetch('/animes', {
     order: 'score',
     limit: '12',
-    status: 'released',
     score: '7',
   });
   return data as ShikimoriAnime[];
 }
 
 export async function fetchSeasonal(): Promise<ShikimoriAnime[]> {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = now.getMonth() + 1;
-  const seasonName = month <= 3 ? 'winter' : month <= 6 ? 'spring' : month <= 9 ? 'summer' : 'fall';
+  await delay(350); // Пауза, чтобы не превышать лимит запросов в секунду
   const data = await shikimoriFetch('/animes', {
     order: 'popularity',
     limit: '12',
-    season: `${year}_${seasonName}`,
     status: 'ongoing',
   });
   return data as ShikimoriAnime[];
 }
 
 export async function fetchPopular(): Promise<ShikimoriAnime[]> {
+  await delay(700); // Пауза для очереди
   const data = await shikimoriFetch('/animes', {
     order: 'popularity',
     limit: '12',
