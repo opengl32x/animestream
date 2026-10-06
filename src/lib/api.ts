@@ -1,12 +1,12 @@
 import type { ShikimoriAnime, ShikimoriScreenshot, ShikimoriCharacter, AgeRating, AnimeStatus } from '@/types';
 
-// Прямой URL к API Shikimori вместо функции Supabase
-const PROXY_BASE = 'https://shikimori.one/api';
+// Перенаправляем запросы через Vercel Rewrite (/api/shikimori из vercel.json)
+const PROXY_BASE = '/api/shikimori';
 const SHIKIMORI_IMG = 'https://shikimori.one';
 const KODIK_PLAYER_BASE = 'https://kodik.cc/players/player?shikimori_id=';
 
 async function shikimoriFetch(path: string, params?: Record<string, string | string[] | undefined>): Promise<unknown> {
-  const url = new URL(PROXY_BASE + path);
+  const url = new URL(PROXY_BASE + path, window.location.origin);
   if (params) {
     for (const [key, value] of Object.entries(params)) {
       if (value === undefined || value === '') continue;
@@ -18,12 +18,8 @@ async function shikimoriFetch(path: string, params?: Record<string, string | str
     }
   }
 
-  const resp = await fetch(url.toString(), {
-    headers: {
-      'User-Agent': 'Anistream/1.0', // Shikimori требует User-Agent
-      'Content-Type': 'application/json',
-    },
-  });
+  // Убираем заголовки (User-Agent и Content-Type), так как Vercel сам проксирует запрос
+  const resp = await fetch(url.toString());
 
   if (!resp.ok) {
     throw new Error(`API error: ${resp.status}`);
@@ -31,7 +27,6 @@ async function shikimoriFetch(path: string, params?: Record<string, string | str
 
   return resp.json();
 }
-
 
 export function imageUrl(path: string | undefined): string {
   if (!path) return '';
