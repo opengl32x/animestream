@@ -1,11 +1,22 @@
 import { useEffect, useState, useCallback } from 'react';
 import { Star, Clock, Calendar, Film, Users, ChevronLeft, Play, Loader2, Send, Trash2, Bookmark as BookmarkIcon } from 'lucide-react';
 import type { ShikimoriAnime, ShikimoriScreenshot, ShikimoriCharacter, BookmarkStatus, Comment, Profile } from '@/types';
-import { fetchAnimeById, fetchScreenshots, fetchCharacters, imageUrl, ratingBadge, kodikPlayerUrl } from '@/lib/api';
+import {
+  fetchAnimeById,
+  fetchScreenshots,
+  fetchCharacters,
+  imageUrl,
+  ratingBadge,
+  fetchAnivoxDubbers,
+  fetchAnivoxStream,
+  type AnivoxDubber,
+  type AnivoxStreamResponse,
+} from '@/lib/api';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/lib/auth-context';
 import { navigate } from '@/lib/router';
 import { ErrorState } from '@/components/Skeletons';
+import { VideoPlayer } from '@/components/VideoPlayer';
 
 const BOOKMARK_STATUSES: { value: BookmarkStatus; label: string; color: string }[] = [
   { value: 'watching', label: 'Смотрю', color: 'bg-emerald-500/20 text-emerald-300 ring-emerald-500/30' },
@@ -25,9 +36,16 @@ export function AnimeDetailPage({ animeId }: AnimeDetailPageProps) {
   const [characters, setCharacters] = useState<ShikimoriCharacter[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [playerLoaded, setPlayerLoaded] = useState(false);
   const [activeScreenshot, setActiveScreenshot] = useState<string | null>(null);
   const [showAllChars, setShowAllChars] = useState(false);
+
+  // ===== ANIVOX PLAYER STATE =====
+  const [dubbers, setDubbers] = useState<AnivoxDubber[]>([]);
+  const [activeDubber, setActiveDubber] = useState<number | null>(null);
+  const [episode, setEpisode] = useState(1);
+  const [stream, setStream] = useState<AnivoxStreamResponse | null>(null);
+  const [streamLoading, setStreamLoading] = useState(false);
+  const [streamError, setStreamError] = useState<string | null>(null);
 
   // Bookmark state
   const [bookmark, setBookmark] = useState<BookmarkStatus | null>(null);
@@ -44,7 +62,6 @@ export function AnimeDetailPage({ animeId }: AnimeDetailPageProps) {
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
-    setPlayerLoaded(false);
     try {
       const [animeData, screenshotsData, charactersData] = await Promise.all([
         fetchAnimeById(animeId),
@@ -64,6 +81,31 @@ export function AnimeDetailPage({ animeId }: AnimeDetailPageProps) {
 
   useEffect(() => { load(); }, [load]);
 
+  // Загружаем список озвучек anivox
+  useEffect(() => {
+    if (!anime) return;
+    fetchAnivoxDubbers(anime.id).then(list => {
+      setDubbers(list);
+      if (list.length > 0) setActiveDubber(list[0].id);
+    });
+  }, [anime]);
+
+  // Загружаем поток при смене озвучки/эпизода
+  useEffect(() => {
+    if (!anime || activeDubber === null) return;
+    setStreamLoading(true);
+    setStreamError(null);
+    setStream(null);
+    fetchAnivoxStream(anime.id, episode, activeDubber).then(s => {
+      if (!s) {
+        setStreamError('Не удалось получить поток для этой озвучки.');
+      } else {
+        setStream(s);
+      }
+      setStreamLoading(false);
+    });
+  }, [anime, activeDubber, episode]);
+
   // Load bookmark
   useEffect(() => {
     if (!user) { setBookmark(null); return; }
@@ -74,11 +116,10 @@ export function AnimeDetailPage({ animeId }: AnimeDetailPageProps) {
       .eq('user_id', user.id)
       .maybeSingle()
       .then(({ data }) => {
-        setBookmark(data?.status as BookmarkStatus | null ?? null);
+        setBookmark((data?.status as BookmarkStatus | null) ?? null);
       });
   }, [user, animeId]);
 
-  // Load comments
   const loadComments = useCallback(async () => {
     const { data, error: cError } = await supabase
       .from('comments')
@@ -89,7 +130,6 @@ export function AnimeDetailPage({ animeId }: AnimeDetailPageProps) {
     const commentList = (data ?? []) as Comment[];
     setComments(commentList);
 
-    // Load profiles for comment authors
     const userIds = [...new Set(commentList.map(c => c.user_id))];
     if (userIds.length > 0) {
       const { data: profilesData } = await supabase
@@ -117,7 +157,6 @@ export function AnimeDetailPage({ animeId }: AnimeDetailPageProps) {
     setShowBookmarkMenu(false);
     try {
       if (bookmark === status) {
-        // Remove bookmark
         await supabase
           .from('bookmarks')
           .delete()
@@ -125,7 +164,6 @@ export function AnimeDetailPage({ animeId }: AnimeDetailPageProps) {
           .eq('user_id', user.id);
         setBookmark(null);
       } else if (bookmark) {
-        // Update existing
         await supabase
           .from('bookmarks')
           .update({ status })
@@ -133,7 +171,6 @@ export function AnimeDetailPage({ animeId }: AnimeDetailPageProps) {
           .eq('user_id', user.id);
         setBookmark(status);
       } else {
-        // Insert new
         await supabase
           .from('bookmarks')
           .insert({ shikimori_id: animeId, status });
@@ -208,12 +245,10 @@ export function AnimeDetailPage({ animeId }: AnimeDetailPageProps) {
 
   const badge = ratingBadge(anime.rating);
   const title = anime.russian || anime.name;
-  const playerUrl = kodikPlayerUrl(anime.id);
   const displayedCharacters = showAllChars ? characters : characters.slice(0, 8);
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-6">
-      {/* Back */}
       <button
         onClick={() => navigate({ name: 'catalog' })}
         className="mb-4 flex items-center gap-1 text-sm text-zinc-400 transition hover:text-zinc-200"
@@ -222,8 +257,7 @@ export function AnimeDetailPage({ animeId }: AnimeDetailPageProps) {
       </button>
 
       <div className="flex flex-col gap-6 sm:flex-row">
-        {/* Poster */}
-        <div className="w-full max-w-[200px] shrink-0 mx-auto sm:mx-0 sm:w-56">
+        <div className="mx-auto w-full max-w-[200px] shrink-0 sm:mx-0 sm:w-56">
           <div className="overflow-hidden rounded-xl ring-1 ring-zinc-800">
             <img
               src={imageUrl(anime.image.original)}
@@ -238,12 +272,10 @@ export function AnimeDetailPage({ animeId }: AnimeDetailPageProps) {
           )}
         </div>
 
-        {/* Info */}
         <div className="min-w-0 flex-1">
           <h1 className="text-2xl font-bold text-white sm:text-3xl">{title}</h1>
           <p className="mt-1 text-sm text-zinc-500">{anime.name}</p>
 
-          {/* Stats */}
           <div className="mt-4 flex flex-wrap items-center gap-3">
             {anime.score && anime.score !== '0.0' && (
               <div className="flex items-center gap-1.5 rounded-lg bg-yellow-500/10 px-3 py-1.5 ring-1 ring-yellow-500/20">
@@ -277,7 +309,6 @@ export function AnimeDetailPage({ animeId }: AnimeDetailPageProps) {
             )}
           </div>
 
-          {/* Genres */}
           {anime.genres && anime.genres.length > 0 && (
             <div className="mt-4 flex flex-wrap gap-2">
               {anime.genres.map(g => (
@@ -288,8 +319,7 @@ export function AnimeDetailPage({ animeId }: AnimeDetailPageProps) {
             </div>
           )}
 
-          {/* Bookmark button */}
-          <div className="mt-5 relative">
+          <div className="relative mt-5">
             <button
               onClick={() => setShowBookmarkMenu(!showBookmarkMenu)}
               disabled={bookmarkLoading}
@@ -303,202 +333,10 @@ export function AnimeDetailPage({ animeId }: AnimeDetailPageProps) {
               {bookmark ? BOOKMARK_STATUSES.find(s => s.value === bookmark)?.label : 'В список'}
             </button>
             {showBookmarkMenu && (
-              <div className="absolute left-0 top-full mt-2 z-30 w-44 rounded-xl border border-zinc-800 bg-zinc-900 p-1.5 shadow-2xl">
+              <div className="absolute left-0 top-full z-30 mt-2 w-44 rounded-xl border border-zinc-800 bg-zinc-900 p-1.5 shadow-2xl">
                 {BOOKMARK_STATUSES.map(s => (
                   <button
                     key={s.value}
                     onClick={() => handleBookmark(s.value)}
                     className={`flex w-full items-center justify-between rounded-lg px-3 py-2 text-sm transition hover:bg-zinc-800 ${
-                      bookmark === s.value ? 'text-rose-400' : 'text-zinc-300'
-                    }`}
-                  >
-                    {s.label}
-                    {bookmark === s.value && <span className="text-xs">✓</span>}
-                  </button>
-                ))}
-                {bookmark && (
-                  <button
-                    onClick={() => handleBookmark(bookmark)}
-                    className="mt-1 flex w-full items-center gap-2 border-t border-zinc-800 px-3 py-2 text-sm text-red-400 transition hover:bg-zinc-800"
-                  >
-                    <Trash2 className="h-3.5 w-3.5" /> Удалить
-                  </button>
-                )}
-              </div>
-            )}
-          </div>
-
-          {/* Description */}
-          {anime.description && (
-            <div className="mt-6">
-              <h2 className="mb-2 text-sm font-semibold text-zinc-400">Описание</h2>
-              <p className="text-sm leading-relaxed text-zinc-300">{anime.description}</p>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Player */}
-      <div className="mt-8">
-        <h2 className="mb-3 text-lg font-bold text-white">Смотреть онлайн</h2>
-        <div className="relative aspect-video w-full overflow-hidden rounded-2xl bg-black ring-1 ring-zinc-800">
-          {!playerLoaded && (
-            <div className="absolute inset-0 flex items-center justify-center bg-zinc-900">
-              <Loader2 className="h-8 w-8 animate-spin text-rose-500" />
-            </div>
-          )}
-          <iframe
-            src={playerUrl}
-            className="h-full w-full"
-            allowFullScreen
-            allow="autoplay; fullscreen; encrypted-media"
-            onLoad={() => setPlayerLoaded(true)}
-            title="Kodik Player"
-          />
-        </div>
-        <p className="mt-2 text-xs text-zinc-500">
-          Плеер автоматически выбирает русскую озвучку (приоритет: AniLibria, Studio Band, Dubbing)
-        </p>
-      </div>
-
-      {/* Screenshots */}
-      {screenshots.length > 0 && (
-        <div className="mt-8">
-          <h2 className="mb-3 text-lg font-bold text-white">Кадры</h2>
-          {activeScreenshot && (
-            <div className="mb-3 overflow-hidden rounded-xl ring-1 ring-zinc-800">
-              <img src={activeScreenshot} alt="Кадр из аниме" className="w-full max-h-[420px] object-contain bg-black" />
-            </div>
-          )}
-          <div className="flex gap-2 overflow-x-auto pb-2">
-            {screenshots.map(s => (
-              <button
-                key={s.id}
-                onClick={() => setActiveScreenshot(imageUrl(s.original))}
-                className="shrink-0 overflow-hidden rounded-lg ring-1 ring-zinc-800 transition hover:ring-rose-500/50"
-              >
-                <img src={imageUrl(s.preview)} alt="Кадр" className="h-16 w-28 object-cover" loading="lazy" />
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Characters */}
-      {characters.length > 0 && (
-        <div className="mt-8">
-          <h2 className="mb-3 flex items-center gap-2 text-lg font-bold text-white">
-            <Users className="h-5 w-5 text-rose-400" /> Персонажи
-          </h2>
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-8">
-            {displayedCharacters.map(c => (
-              <div key={c.id} className="overflow-hidden rounded-xl bg-zinc-900/60 ring-1 ring-zinc-800">
-                <div className="aspect-square w-full overflow-hidden">
-                  <img
-                    src={imageUrl(c.image.original)}
-                    alt={c.russian || c.name}
-                    className="h-full w-full object-cover transition hover:scale-110"
-                    loading="lazy"
-                  />
-                </div>
-                <div className="p-2">
-                  <p className="truncate text-xs font-medium text-zinc-200" title={c.russian || c.name}>
-                    {c.russian || c.name}
-                  </p>
-                  <p className="truncate text-[10px] text-zinc-500">{c.roles}</p>
-                </div>
-              </div>
-            ))}
-          </div>
-          {characters.length > 8 && (
-            <button
-              onClick={() => setShowAllChars(!showAllChars)}
-              className="mt-3 text-sm text-rose-400 transition hover:text-rose-300"
-            >
-              {showAllChars ? 'Скрыть' : `Показать всех (${characters.length})`}
-            </button>
-          )}
-        </div>
-      )}
-
-      {/* Comments */}
-      <div className="mt-10">
-        <h2 className="mb-4 text-lg font-bold text-white">Отзывы и комментарии</h2>
-
-        {/* Comment form */}
-        {user ? (
-          <form onSubmit={handleSubmitComment} className="mb-6">
-            <textarea
-              value={commentText}
-              onChange={e => setCommentText(e.target.value)}
-              placeholder="Поделитесь своим мнением об аниме..."
-              rows={3}
-              className="w-full rounded-xl bg-zinc-800/60 p-3 text-sm text-zinc-100 placeholder-zinc-500 outline-none ring-1 ring-zinc-700/50 transition focus:ring-2 focus:ring-rose-500/50 resize-none"
-            />
-            {commentError && <p className="mt-2 text-sm text-red-400">{commentError}</p>}
-            <button
-              type="submit"
-              disabled={!commentText.trim() || commentSubmitting}
-              className="mt-2 flex items-center gap-2 rounded-lg bg-rose-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-rose-600 disabled:opacity-50"
-            >
-              {commentSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-              Отправить
-            </button>
-          </form>
-        ) : (
-          <div className="mb-6 rounded-xl bg-zinc-900/60 p-4 text-center ring-1 ring-zinc-800">
-            <p className="text-sm text-zinc-400">
-              <button onClick={() => navigate({ name: 'login' })} className="text-rose-400 hover:text-rose-300">
-                Войдите
-              </button>
-              , чтобы оставлять комментарии
-            </p>
-          </div>
-        )}
-
-        {/* Comment list */}
-        {comments.length === 0 ? (
-          <p className="py-8 text-center text-sm text-zinc-500">Пока нет комментариев. Будьте первым!</p>
-        ) : (
-          <div className="space-y-3">
-            {comments.map(c => {
-              const author = commentProfiles[c.user_id];
-              return (
-                <div key={c.id} className="rounded-xl bg-zinc-900/60 p-4 ring-1 ring-zinc-800">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <div className="flex h-8 w-8 items-center justify-center overflow-hidden rounded-full bg-zinc-800">
-                        {author?.avatar_url ? (
-                          <img src={author.avatar_url} alt={author.username} className="h-full w-full object-cover" />
-                        ) : (
-                          <span className="text-xs font-bold text-zinc-400">
-                            {(author?.username || 'Аноним')[0]?.toUpperCase()}
-                          </span>
-                        )}
-                      </div>
-                      <div>
-                        <p className="text-sm font-medium text-zinc-200">{author?.username || 'Аноним'}</p>
-                        <p className="text-xs text-zinc-500">
-                          {new Date(c.created_at).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' })}
-                        </p>
-                      </div>
-                    </div>
-                    {user?.id === c.user_id && (
-                      <button
-                        onClick={() => handleDeleteComment(c.id)}
-                        className="text-zinc-600 transition hover:text-red-400"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
-                    )}
-                  </div>
-                  <p className="mt-3 text-sm leading-relaxed text-zinc-300 whitespace-pre-wrap">{c.text}</p>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
+                      bookmark
