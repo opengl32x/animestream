@@ -79,7 +79,9 @@ export function AnimeDetailPage({ animeId }: AnimeDetailPageProps) {
     }
   }, [animeId]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    load();
+  }, [load]);
 
   // Загружаем список озвучек anivox
   useEffect(() => {
@@ -108,7 +110,10 @@ export function AnimeDetailPage({ animeId }: AnimeDetailPageProps) {
 
   // Load bookmark
   useEffect(() => {
-    if (!user) { setBookmark(null); return; }
+    if (!user) {
+      setBookmark(null);
+      return;
+    }
     supabase
       .from('bookmarks')
       .select('status')
@@ -146,7 +151,9 @@ export function AnimeDetailPage({ animeId }: AnimeDetailPageProps) {
     }
   }, [animeId]);
 
-  useEffect(() => { loadComments(); }, [loadComments]);
+  useEffect(() => {
+    loadComments();
+  }, [loadComments]);
 
   const handleBookmark = async (status: BookmarkStatus) => {
     if (!user) {
@@ -216,7 +223,9 @@ export function AnimeDetailPage({ animeId }: AnimeDetailPageProps) {
     try {
       await supabase.from('comments').delete().eq('id', commentId);
       setComments(prev => prev.filter(c => c.id !== commentId));
-    } catch { /* ignore */ }
+    } catch {
+      // ignore
+    }
   };
 
   if (error) return <ErrorState message={error} onRetry={load} />;
@@ -249,6 +258,7 @@ export function AnimeDetailPage({ animeId }: AnimeDetailPageProps) {
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-6">
+      {/* Back */}
       <button
         onClick={() => navigate({ name: 'catalog' })}
         className="mb-4 flex items-center gap-1 text-sm text-zinc-400 transition hover:text-zinc-200"
@@ -257,6 +267,7 @@ export function AnimeDetailPage({ animeId }: AnimeDetailPageProps) {
       </button>
 
       <div className="flex flex-col gap-6 sm:flex-row">
+        {/* Poster */}
         <div className="mx-auto w-full max-w-[200px] shrink-0 sm:mx-0 sm:w-56">
           <div className="overflow-hidden rounded-xl ring-1 ring-zinc-800">
             <img
@@ -272,10 +283,12 @@ export function AnimeDetailPage({ animeId }: AnimeDetailPageProps) {
           )}
         </div>
 
+        {/* Info */}
         <div className="min-w-0 flex-1">
           <h1 className="text-2xl font-bold text-white sm:text-3xl">{title}</h1>
           <p className="mt-1 text-sm text-zinc-500">{anime.name}</p>
 
+          {/* Stats */}
           <div className="mt-4 flex flex-wrap items-center gap-3">
             {anime.score && anime.score !== '0.0' && (
               <div className="flex items-center gap-1.5 rounded-lg bg-yellow-500/10 px-3 py-1.5 ring-1 ring-yellow-500/20">
@@ -309,6 +322,7 @@ export function AnimeDetailPage({ animeId }: AnimeDetailPageProps) {
             )}
           </div>
 
+          {/* Genres */}
           {anime.genres && anime.genres.length > 0 && (
             <div className="mt-4 flex flex-wrap gap-2">
               {anime.genres.map(g => (
@@ -319,6 +333,7 @@ export function AnimeDetailPage({ animeId }: AnimeDetailPageProps) {
             </div>
           )}
 
+          {/* Bookmark button */}
           <div className="relative mt-5">
             <button
               onClick={() => setShowBookmarkMenu(!showBookmarkMenu)}
@@ -339,4 +354,270 @@ export function AnimeDetailPage({ animeId }: AnimeDetailPageProps) {
                     key={s.value}
                     onClick={() => handleBookmark(s.value)}
                     className={`flex w-full items-center justify-between rounded-lg px-3 py-2 text-sm transition hover:bg-zinc-800 ${
-                      bookmark
+                      bookmark === s.value ? 'text-rose-400' : 'text-zinc-300'
+                    }`}
+                  >
+                    {s.label}
+                    {bookmark === s.value && <span className="text-xs">✓</span>}
+                  </button>
+                ))}
+                {bookmark && (
+                  <button
+                    onClick={() => handleBookmark(bookmark)}
+                    className="mt-1 flex w-full items-center gap-2 border-t border-zinc-800 px-3 py-2 text-sm text-red-400 transition hover:bg-zinc-800"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" /> Удалить
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Description */}
+          {anime.description && (
+            <div className="mt-6">
+              <h2 className="mb-2 text-sm font-semibold text-zinc-400">Описание</h2>
+              <p className="text-sm leading-relaxed text-zinc-300">{anime.description}</p>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* ===== PLAYER ===== */}
+      <div className="mt-8">
+        <h2 className="mb-3 text-lg font-bold text-white">Смотреть онлайн</h2>
+
+        {/* Выбор озвучки */}
+        {dubbers.length > 0 && (
+          <div className="mb-3 flex flex-wrap gap-2">
+            {dubbers.map(d => (
+              <button
+                key={d.id}
+                onClick={() => setActiveDubber(d.id)}
+                className={`rounded-lg px-3 py-1.5 text-xs font-medium transition ${
+                  activeDubber === d.id
+                    ? 'bg-rose-500/20 text-rose-300 ring-1 ring-rose-500/40'
+                    : 'bg-zinc-800/60 text-zinc-300 ring-1 ring-zinc-700/50 hover:bg-zinc-700/60'
+                }`}
+              >
+                {d.name}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* Выбор эпизода */}
+        {anime.episodes > 1 && (
+          <div className="mb-3 flex items-center gap-2">
+            <label className="text-sm text-zinc-400">Эпизод:</label>
+            <select
+              value={episode}
+              onChange={e => setEpisode(Number(e.target.value))}
+              className="rounded-lg bg-zinc-800/60 px-3 py-1.5 text-sm text-zinc-200 outline-none ring-1 ring-zinc-700/50"
+            >
+              {Array.from({ length: anime.episodes }, (_, i) => i + 1).map(n => (
+                <option key={n} value={n}>
+                  {n}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+
+        {streamError ? (
+          <div className="flex aspect-video w-full items-center justify-center rounded-2xl bg-zinc-900 ring-1 ring-zinc-800">
+            <p className="text-sm text-red-400">{streamError}</p>
+          </div>
+        ) : streamLoading || !stream ? (
+          <div className="flex aspect-video w-full items-center justify-center rounded-2xl bg-zinc-900 ring-1 ring-zinc-800">
+            <Loader2 className="h-8 w-8 animate-spin text-rose-500" />
+          </div>
+        ) : (
+          <VideoPlayer stream={stream} poster={imageUrl(anime.image.original)} />
+        )}
+
+        {dubbers.length === 0 && !streamLoading && (
+          <p className="mt-2 text-xs text-zinc-500">
+            Для этого аниме пока нет доступных озвучек.
+          </p>
+        )}
+      </div>
+
+      {/* Screenshots */}
+      {screenshots.length > 0 && (
+        <div className="mt-8">
+          <h2 className="mb-3 text-lg font-bold text-white">Кадры</h2>
+          {activeScreenshot && (
+            <div className="mb-3 overflow-hidden rounded-xl ring-1 ring-zinc-800">
+              <img
+                src={activeScreenshot}
+                alt="Кадр из аниме"
+                className="max-h-[420px] w-full bg-black object-contain"
+              />
+            </div>
+          )}
+          <div className="flex gap-2 overflow-x-auto pb-2">
+            {screenshots.map(s => (
+              <button
+                key={s.id}
+                onClick={() => setActiveScreenshot(imageUrl(s.original))}
+                className="shrink-0 overflow-hidden rounded-lg ring-1 ring-zinc-800 transition hover:ring-rose-500/50"
+              >
+                <img
+                  src={imageUrl(s.preview)}
+                  alt="Кадр"
+                  className="h-16 w-28 object-cover"
+                  loading="lazy"
+                />
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Characters */}
+      {characters.length > 0 && (
+        <div className="mt-8">
+          <h2 className="mb-3 flex items-center gap-2 text-lg font-bold text-white">
+            <Users className="h-5 w-5 text-rose-400" /> Персонажи
+          </h2>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-8">
+            {displayedCharacters.map(c => (
+              <div
+                key={c.id}
+                className="overflow-hidden rounded-xl bg-zinc-900/60 ring-1 ring-zinc-800"
+              >
+                <div className="aspect-square w-full overflow-hidden">
+                  <img
+                    src={imageUrl(c.image.original)}
+                    alt={c.russian || c.name}
+                    className="h-full w-full object-cover transition hover:scale-110"
+                    loading="lazy"
+                  />
+                </div>
+                <div className="p-2">
+                  <p
+                    className="truncate text-xs font-medium text-zinc-200"
+                    title={c.russian || c.name}
+                  >
+                    {c.russian || c.name}
+                  </p>
+                  <p className="truncate text-[10px] text-zinc-500">{c.roles}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+          {characters.length > 8 && (
+            <button
+              onClick={() => setShowAllChars(!showAllChars)}
+              className="mt-3 text-sm text-rose-400 transition hover:text-rose-300"
+            >
+              {showAllChars ? 'Скрыть' : `Показать всех (${characters.length})`}
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Comments */}
+      <div className="mt-10">
+        <h2 className="mb-4 text-lg font-bold text-white">Отзывы и комментарии</h2>
+
+        {user ? (
+          <form onSubmit={handleSubmitComment} className="mb-6">
+            <textarea
+              value={commentText}
+              onChange={e => setCommentText(e.target.value)}
+              placeholder="Поделитесь своим мнением об аниме..."
+              rows={3}
+              className="w-full resize-none rounded-xl bg-zinc-800/60 p-3 text-sm text-zinc-100 placeholder-zinc-500 outline-none ring-1 ring-zinc-700/50 transition focus:ring-2 focus:ring-rose-500/50"
+            />
+            {commentError && <p className="mt-2 text-sm text-red-400">{commentError}</p>}
+            <button
+              type="submit"
+              disabled={!commentText.trim() || commentSubmitting}
+              className="mt-2 flex items-center gap-2 rounded-lg bg-rose-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-rose-600 disabled:opacity-50"
+            >
+              {commentSubmitting ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Send className="h-4 w-4" />
+              )}
+              Отправить
+            </button>
+          </form>
+        ) : (
+          <div className="mb-6 rounded-xl bg-zinc-900/60 p-4 text-center ring-1 ring-zinc-800">
+            <p className="text-sm text-zinc-400">
+              <button
+                onClick={() => navigate({ name: 'login' })}
+                className="text-rose-400 hover:text-rose-300"
+              >
+                Войдите
+              </button>
+              , чтобы оставлять комментарии
+            </p>
+          </div>
+        )}
+
+        {comments.length === 0 ? (
+          <p className="py-8 text-center text-sm text-zinc-500">
+            Пока нет комментариев. Будьте первым!
+          </p>
+        ) : (
+          <div className="space-y-3">
+            {comments.map(c => {
+              const author = commentProfiles[c.user_id];
+              return (
+                <div
+                  key={c.id}
+                  className="rounded-xl bg-zinc-900/60 p-4 ring-1 ring-zinc-800"
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <div className="flex h-8 w-8 items-center justify-center overflow-hidden rounded-full bg-zinc-800">
+                        {author?.avatar_url ? (
+                          <img
+                            src={author.avatar_url}
+                            alt={author.username}
+                            className="h-full w-full object-cover"
+                          />
+                        ) : (
+                          <span className="text-xs font-bold text-zinc-400">
+                            {(author?.username || 'Аноним')[0]?.toUpperCase()}
+                          </span>
+                        )}
+                      </div>
+                      <div>
+                        <p className="text-sm font-medium text-zinc-200">
+                          {author?.username || 'Аноним'}
+                        </p>
+                        <p className="text-xs text-zinc-500">
+                          {new Date(c.created_at).toLocaleDateString('ru-RU', {
+                            day: 'numeric',
+                            month: 'long',
+                            year: 'numeric',
+                          })}
+                        </p>
+                      </div>
+                    </div>
+                    {user?.id === c.user_id && (
+                      <button
+                        onClick={() => handleDeleteComment(c.id)}
+                        className="text-zinc-600 transition hover:text-red-400"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    )}
+                  </div>
+                  <p className="mt-3 whitespace-pre-wrap text-sm leading-relaxed text-zinc-300">
+                    {c.text}
+                  </p>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
