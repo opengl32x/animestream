@@ -1,0 +1,8 @@
+{
+  "rewrites": [
+    {
+      "source": "/api/shikimori/:path*",
+      "destination": "https://shikimori.one/api/:path*"
+    }
+  ]
+}
