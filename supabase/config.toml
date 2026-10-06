@@ -1,0 +1,2 @@
+[functions.shikimori-api]
+verify_jwt = false
