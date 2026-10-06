@@ -1,11 +1,8 @@
 import type { ShikimoriAnime, ShikimoriScreenshot, ShikimoriCharacter, AgeRating, AnimeStatus } from '@/types';
 
-// Запросы идут через Vercel Rewrite (/api/shikimori из vercel.json)
 const PROXY_BASE = '/api/shikimori';
 const SHIKIMORI_IMG = 'https://shikimori.one';
-const KODIK_PLAYER_BASE = 'https://kodik.info/find-player?shikimoriID=';
 
-// Пауза между запросами, чтобы не словить 429
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function shikimoriFetch(
@@ -27,7 +24,6 @@ async function shikimoriFetch(
 
   const resp = await fetch(url.toString());
 
-  // При 429 (слишком много запросов) ждём и повторяем
   if (resp.status === 429 && retries > 0) {
     await delay(1000);
     return shikimoriFetch(path, params, retries - 1);
@@ -44,15 +40,6 @@ export function imageUrl(path: string | undefined): string {
   if (!path) return '';
   if (path.startsWith('http')) return path;
   return SHIKIMORI_IMG + path;
-}
-
-export function kodikPlayerUrl(shikimoriId: number | string, translationId?: string): string {
-  const prioritize = 'anilibria,studio_band,dubbing';
-  let url = `${KODIK_PLAYER_BASE}${shikimoriId}&prioritize_translations=${prioritize}&season=1`;
-  if (translationId) {
-    url += `&translation_id=${translationId}`;
-  }
-  return url;
 }
 
 export async function fetchAnimes(params: {
@@ -72,7 +59,6 @@ export async function fetchAnimes(params: {
     page: String(params.page ?? 1),
     limit: String(params.limit ?? 20),
   };
-  // При поиске не задаём order, чтобы Shikimori сортировал по релевантности
   if (params.order) query.order = params.order;
   else if (!params.search) query.order = 'popularity';
   if (params.kind) query.kind = params.kind;
@@ -108,7 +94,6 @@ export async function fetchGenres(): Promise<{ id: number; name: string; russian
   return data as { id: number; name: string; russian: string; kind: string; }[];
 }
 
-// ИСПРАВЛЕНО: order 'score' не существует у Shikimori (422), используем 'ranked'
 export async function fetchTopScore(): Promise<ShikimoriAnime[]> {
   const data = await shikimoriFetch('/animes', {
     order: 'ranked',
@@ -137,7 +122,6 @@ export async function fetchPopular(): Promise<ShikimoriAnime[]> {
   return data as ShikimoriAnime[];
 }
 
-// Загрузка всех блоков главной: если один упал, остальные всё равно покажутся
 export async function fetchHomeData(): Promise<{
   top: ShikimoriAnime[];
   seasonal: ShikimoriAnime[];
@@ -158,7 +142,6 @@ export async function fetchHomeData(): Promise<{
   };
 }
 
-// Запасная обложка из MyAnimeList (ID Shikimori совпадает с ID MAL)
 export async function fetchFallbackPoster(id: number): Promise<string> {
   try {
     const r = await fetch(`https://api.jikan.moe/v4/anime/${id}`);
@@ -190,4 +173,52 @@ export function ratingBadge(rating: string | undefined): { label: string; color:
     'none': { label: '', color: '' },
   };
   return map[rating.toLowerCase()] ?? null;
+}
+
+// ==================== ANIVOX INTEGRATION ====================
+
+const ANIVOX_BASE = '/api/anivox';
+
+export interface AnivoxDubber {
+  id: number;
+  name: string;
+  team?: string;
+}
+
+export interface AnivoxStreamResponse {
+  links: Record<string, string>;
+  skips?: { opening?: number[] | null; ending?: number[] | null };
+  thumbnail?: string | null;
+}
+
+export async function fetchAnivoxDubbers(shikimoriId: number): Promise<AnivoxDubber[]> {
+  try {
+    const resp = await fetch(`${ANIVOX_BASE}/anime/${shikimoriId}?with_dubbers=1`);
+    if (!resp.ok) return [];
+    const data = await resp.json();
+    return (data.translations ?? data.dubbers ?? []) as AnivoxDubber[];
+  } catch {
+    return [];
+  }
+}
+
+export async function fetchAnivoxStream(
+  shikimoriId: number,
+  episode: number,
+  dubberId: number,
+): Promise<AnivoxStreamResponse | null> {
+  try {
+    const url = `${ANIVOX_BASE}/episodes/${shikimoriId}/${episode}?dubber=${dubberId}&room_id=&with_kodik=false`;
+    const resp = await fetch(url);
+    if (!resp.ok) return null;
+    const data = (await resp.json()) as AnivoxStreamResponse;
+    if (data.links) {
+      for (const q of Object.keys(data.links)) {
+        if (data.links[q].startsWith('//')) data.links[q] = 'https:' + data.links[q];
+      }
+    }
+    return data;
+  } catch {
+    return null;
+  }
 }
