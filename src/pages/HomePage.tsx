@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { Flame, TrendingUp, Sparkles, ArrowRight } from 'lucide-react';
 import type { ShikimoriAnime } from '@/types';
-import { fetchPopular, fetchSeasonal, fetchTopScore } from '@/lib/api';
+import { fetchHomeData } from '@/lib/api';
 import { AnimeCardList } from '@/components/AnimeCard';
 import { CardGridSkeleton, ErrorState } from '@/components/Skeletons';
 import { navigate } from '@/lib/router';
@@ -17,14 +17,10 @@ export function HomePage() {
     setLoading(true);
     setError(null);
     try {
-      const [seasonalData, popularData, topData] = await Promise.all([
-        fetchSeasonal(),
-        fetchPopular(),
-        fetchTopScore(),
-      ]);
-      setSeasonal(seasonalData);
-      setPopular(popularData);
-      setTopScore(topData);
+      const data = await fetchHomeData();
+      setSeasonal(data.seasonal);
+      setPopular(data.popular);
+      setTopScore(data.top);
     } catch {
       setError('Не удалось загрузить данные. Проверьте подключение к интернету.');
     } finally {
