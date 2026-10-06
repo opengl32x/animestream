@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
-import { Search, X, TrendingUp, LayoutGrid, User as UserIcon, LogOut, Home as HomeIcon } from 'lucide-react';
+import { Search, X, LayoutGrid, User as UserIcon, LogOut, Home as HomeIcon } from 'lucide-react';
 import type { ShikimoriAnime } from '@/types';
-import { fetchAnimes, imageUrl, ratingBadge } from '@/lib/api';
+import { fetchAnimes, imageUrl } from '@/lib/api';
 import { navigate, useRoute } from '@/lib/router';
 import { useAuth } from '@/lib/auth-context';
 
@@ -13,31 +13,88 @@ export function Header() {
   const [showResults, setShowResults] = useState(false);
   const [searching, setSearching] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const reqId = useRef(0);
   const searchRef = useRef<HTMLDivElement>(null);
   const userMenuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    if (!searchQuery.trim()) {
+    const q = searchQuery.trim();
+    const id = ++reqId.current; // отсекаем устаревшие ответы
+    if (q.length < 2) {
       setSearchResults([]);
+      setSearching(false);
       return;
     }
     setSearching(true);
-    debounceRef.current = setTimeout(async () => {
+    const t = setTimeout(async () => {
       try {
-        const results = await fetchAnimes({ search: searchQuery, limit: 8 });
-        setSearchResults(results);
+        const results = await fetchAnimes({ search: q, limit: 8 });
+        if (id === reqId.current) setSearchResults(results);
       } catch {
-        setSearchResults([]);
+        if (id === reqId.current) setSearchResults([]);
       } finally {
-        setSearching(false);
+        if (id === reqId.current) setSearching(false);
       }
-    }, 400);
-    return () => {
-      if (debounceRef.current) clearTimeout(debounceRef.current);
-    };
+    }, 300);
+    return () => clearTimeout(t);
   }, [searchQuery]);
+
+  const closeSearch = () => {
+    setShowResults(false);
+    setMobileOpen(false);
+    setSearchQuery('');
+    setSearchResults([]);
+  };
+
+  const openAnime = (id: number) => {
+    navigate({ name: 'anime', id });
+    closeSearch();
+  };
+
+  const onSearchKey = (e: React.KeyboardEvent) => {
+    if (e.key === 'Escape') closeSearch();
+    if (e.key === 'Enter' && searchResults[0]) openAnime(searchResults[0].id);
+  };
+
+  const resultsList = (
+    <>
+      {searchQuery.trim().length < 2 ? (
+        <div className="p-4 text-center text-sm text-zinc-500">Введите минимум 2 символа</div>
+      ) : searching ? (
+        <div className="p-4 text-center text-sm text-zinc-500">Поиск...</div>
+      ) : searchResults.length === 0 ? (
+        <div className="p-4 text-center text-sm text-zinc-500">Ничего не найдено</div>
+      ) : (
+        searchResults.map((anime) => {
+          const title = anime.russian || anime.name;
+          return (
+            <button
+              key={anime.id}
+              onClick={() => openAnime(anime.id)}
+              className="flex w-full items-center gap-3 p-2 text-left transition-colors hover:bg-zinc-800/60"
+            >
+              <img
+                src={imageUrl(anime.image.preview)}
+                alt={title}
+                className="h-16 w-11 shrink-0 rounded object-cover"
+                loading="lazy"
+              />
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-medium text-zinc-200">{title}</p>
+                <p className="truncate text-xs text-zinc-500">{anime.name}</p>
+                <div className="mt-0.5 flex items-center gap-2 text-xs text-zinc-500">
+                  {anime.score && anime.score !== '0.0' && <span className="text-yellow-500">★ {anime.score}</span>}
+                  {anime.kind && <span>{anime.kind.toUpperCase()}</span>}
+                  {anime.aired_on && <span>{anime.aired_on.slice(0, 4)}</span>}
+                </div>
+              </div>
+            </button>
+          );
+        })
+      )}
+    </>
+  );
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -80,8 +137,8 @@ export function Header() {
           </span>
         </button>
 
-        {/* Search */}
-        <div ref={searchRef} className="relative flex-1 max-w-xl mx-2">
+        {/* Search: десктоп */}
+        <div ref={searchRef} className="relative mx-2 hidden max-w-xl flex-1 sm:block">
           <div className="relative">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" />
             <input
@@ -89,6 +146,7 @@ export function Header() {
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               onFocus={() => setShowResults(true)}
+              onKeyDown={onSearchKey}
               placeholder="Поиск аниме..."
               className="w-full rounded-lg bg-zinc-800/60 py-2 pl-9 pr-8 text-sm text-zinc-100 placeholder-zinc-500 outline-none ring-1 ring-zinc-700/50 transition-all focus:ring-2 focus:ring-rose-500/50"
             />
@@ -101,56 +159,22 @@ export function Header() {
               </button>
             )}
           </div>
-
-          {/* Search dropdown */}
           {showResults && searchQuery.trim() && (
             <div className="absolute left-0 right-0 top-full mt-2 max-h-96 overflow-y-auto rounded-xl border border-zinc-800 bg-zinc-900 shadow-2xl shadow-black/50">
-              {searching ? (
-                <div className="p-4 text-center text-sm text-zinc-500">Поиск...</div>
-              ) : searchResults.length === 0 ? (
-                <div className="p-4 text-center text-sm text-zinc-500">Ничего не найдено</div>
-              ) : (
-                searchResults.map((anime) => {
-                  const badge = ratingBadge(anime.rating);
-                  const title = anime.russian || anime.name;
-                  return (
-                    <button
-                      key={anime.id}
-                      onClick={() => {
-                        navigate({ name: 'anime', id: anime.id });
-                        setShowResults(false);
-                        setSearchQuery('');
-                      }}
-                      className="flex w-full items-center gap-3 p-2 text-left transition-colors hover:bg-zinc-800/60"
-                    >
-                      <img
-                        src={imageUrl(anime.image.preview)}
-                        alt={title}
-                        className="h-14 w-10 shrink-0 rounded object-cover"
-                        loading="lazy"
-                      />
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-medium text-zinc-200">{title}</p>
-                        <p className="truncate text-xs text-zinc-500">{anime.name}</p>
-                        <div className="flex items-center gap-2 mt-0.5">
-                          {anime.score && anime.score !== '0.0' && (
-                            <span className="text-xs text-yellow-500">★ {anime.score}</span>
-                          )}
-                          {anime.kind && (
-                            <span className="text-xs text-zinc-600">{anime.kind.toUpperCase()}</span>
-                          )}
-                          {badge && badge.label && (
-                            <span className="text-xs text-zinc-600">{badge.label}</span>
-                          )}
-                        </div>
-                      </div>
-                    </button>
-                  );
-                })
-              )}
+              {resultsList}
             </div>
           )}
         </div>
+
+        {/* Search: мобильная кнопка */}
+        <div className="flex-1 sm:hidden" />
+        <button
+          onClick={() => setMobileOpen(true)}
+          aria-label="Поиск"
+          className="rounded-lg p-2 text-zinc-400 transition hover:bg-zinc-800/50 hover:text-zinc-100 sm:hidden"
+        >
+          <Search className="h-5 w-5" />
+        </button>
 
         {/* Nav */}
         <nav className="flex items-center gap-1 shrink-0">
@@ -210,6 +234,38 @@ export function Header() {
           )}
         </nav>
       </div>
+
+      {/* Search: мобильный полноэкранный режим */}
+      {mobileOpen && (
+        <div className="fixed inset-0 z-[60] flex flex-col bg-zinc-950 sm:hidden">
+          <div className="flex items-center gap-2 border-b border-zinc-800 px-3 py-3">
+            <div className="relative flex-1">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" />
+              <input
+                autoFocus
+                type="search"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                onKeyDown={onSearchKey}
+                placeholder="Поиск аниме..."
+                className="w-full rounded-lg bg-zinc-800/60 py-3 pl-9 pr-8 text-base text-zinc-100 placeholder-zinc-500 outline-none ring-1 ring-zinc-700/50 focus:ring-2 focus:ring-rose-500/50"
+              />
+              {searchQuery && (
+                <button
+                  onClick={() => { setSearchQuery(''); setSearchResults([]); }}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-zinc-500"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              )}
+            </div>
+            <button onClick={closeSearch} className="px-2 py-2 text-sm font-medium text-rose-400">
+              Отмена
+            </button>
+          </div>
+          <div className="flex-1 overflow-y-auto">{resultsList}</div>
+        </div>
+      )}
     </header>
   );
 }

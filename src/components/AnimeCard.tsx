@@ -1,11 +1,44 @@
+import { useEffect, useState } from 'react';
 import type { ShikimoriAnime } from '@/types';
-import { imageUrl, ratingBadge } from '@/lib/api';
+import { imageUrl, ratingBadge, fetchFallbackPoster } from '@/lib/api';
 import { navigate } from '@/lib/router';
 import { StatusBadge } from '@/components/Skeletons';
 import { Star, Play } from 'lucide-react';
 
 interface AnimeCardProps {
   anime: ShikimoriAnime;
+}
+
+// Тайтлы, у которых Shikimori отдаёт битую обложку (например, 1535 — Тетрадь смерти)
+const BAD_POSTERS = new Set<number>([1535]);
+
+function Poster({ anime, title }: { anime: ShikimoriAnime; title: string }) {
+  const first = anime.image.preview || anime.image.original;
+  const [src, setSrc] = useState(imageUrl(first));
+  const [triedFallback, setTriedFallback] = useState(false);
+
+  const loadFallback = async () => {
+    if (triedFallback) return;
+    setTriedFallback(true);
+    const url = await fetchFallbackPoster(anime.id);
+    if (url) setSrc(url);
+  };
+
+  useEffect(() => {
+    const missing = !first || first.includes('missing');
+    if (BAD_POSTERS.has(anime.id) || missing) loadFallback();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [anime.id]);
+
+  return (
+    <img
+      src={src}
+      alt={title}
+      loading="lazy"
+      onError={loadFallback}
+      className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-110"
+    />
+  );
 }
 
 export function AnimeCard({ anime }: AnimeCardProps) {
@@ -18,12 +51,7 @@ export function AnimeCard({ anime }: AnimeCardProps) {
       className="group relative cursor-pointer overflow-hidden rounded-xl bg-zinc-900/80 ring-1 ring-zinc-800 transition-all duration-300 hover:ring-2 hover:ring-rose-500/50 hover:shadow-xl hover:shadow-rose-500/10 hover:-translate-y-1"
     >
       <div className="relative aspect-[3/4] w-full overflow-hidden">
-        <img
-          src={imageUrl(anime.image.original)}
-          alt={title}
-          loading="lazy"
-          className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-110"
-        />
+        <Poster anime={anime} title={title} />
         <div className="absolute inset-0 bg-gradient-to-t from-zinc-900 via-transparent to-transparent opacity-80" />
 
         {/* Play overlay */}
