@@ -1,14 +1,18 @@
 import type { ShikimoriAnime, ShikimoriScreenshot, ShikimoriCharacter, AgeRating, AnimeStatus } from '@/types';
 
-// Перенаправляем запросы через Vercel Rewrite (/api/shikimori из vercel.json)
+// Запросы идут через Vercel Rewrite (/api/shikimori из vercel.json)
 const PROXY_BASE = '/api/shikimori';
 const SHIKIMORI_IMG = 'https://shikimori.one';
 const KODIK_PLAYER_BASE = 'https://kodik.cc/players/player?shikimori_id=';
 
-// Вспомогательная функция задержки для предотвращения ошибки 429
+// Пауза между запросами, чтобы не словить 429
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-async function shikimoriFetch(path: string, params?: Record<string, string | string[] | undefined>): Promise<unknown> {
+async function shikimoriFetch(
+  path: string,
+  params?: Record<string, string | string[] | undefined>,
+  retries = 2,
+): Promise<unknown> {
   const url = new URL(PROXY_BASE + path, window.location.origin);
   if (params) {
     for (const [key, value] of Object.entries(params)) {
@@ -23,8 +27,14 @@ async function shikimoriFetch(path: string, params?: Record<string, string | str
 
   const resp = await fetch(url.toString());
 
+  // При 429 (слишком много запросов) ждём и повторяем
+  if (resp.status === 429 && retries > 0) {
+    await delay(1000);
+    return shikimoriFetch(path, params, retries - 1);
+  }
+
   if (!resp.ok) {
-    throw new Error(`API error: ${resp.status}`);
+    throw new Error(`API error: ${resp.status} (${path})`);
   }
 
   return resp.json();
@@ -96,9 +106,10 @@ export async function fetchGenres(): Promise<{ id: number; name: string; russian
   return data as { id: number; name: string; russian: string; kind: string; }[];
 }
 
+// ИСПРАВЛЕНО: order 'score' не существует у Shikimori (422), используем 'ranked'
 export async function fetchTopScore(): Promise<ShikimoriAnime[]> {
   const data = await shikimoriFetch('/animes', {
-    order: 'score',
+    order: 'ranked',
     limit: '12',
     score: '7',
   });
@@ -106,7 +117,7 @@ export async function fetchTopScore(): Promise<ShikimoriAnime[]> {
 }
 
 export async function fetchSeasonal(): Promise<ShikimoriAnime[]> {
-  await delay(350); // Пауза, чтобы не превышать лимит запросов в секунду
+  await delay(350);
   const data = await shikimoriFetch('/animes', {
     order: 'popularity',
     limit: '12',
@@ -116,12 +127,30 @@ export async function fetchSeasonal(): Promise<ShikimoriAnime[]> {
 }
 
 export async function fetchPopular(): Promise<ShikimoriAnime[]> {
-  await delay(700); // Пауза для очереди
+  await delay(700);
   const data = await shikimoriFetch('/animes', {
     order: 'popularity',
     limit: '12',
   });
   return data as ShikimoriAnime[];
+}
+
+// Загрузка всех блоков главной: если один упал, остальные всё равно покажутся
+export async function fetchHomeData(): Promise<{
+  top: ShikimoriAnime[];
+  seasonal: ShikimoriAnime[];
+  popular: ShikimoriAnime[];
+}> {
+  const [top, seasonal, popular] = await Promise.allSettled([
+    fetchTopScore(),
+    fetchSeasonal(),
+    fetchPopular(),
+  ]);
+  return {
+    top: top.status === 'fulfilled' ? top.value : [],
+    seasonal: seasonal.status === 'fulfilled' ? seasonal.value : [],
+    popular: popular.status === 'fulfilled' ? popular.value : [],
+  };
 }
 
 export const AGE_RATINGS: { value: AgeRating; label: string; }[] = [
