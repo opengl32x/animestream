@@ -175,50 +175,25 @@ export function ratingBadge(rating: string | undefined): { label: string; color:
   return map[rating.toLowerCase()] ?? null;
 }
 
-// ==================== ANIVOX INTEGRATION ====================
+// ==================== KODIK INTEGRATION ====================
+// Вставь это в api.ts ВМЕСТО всего, что идёт после строки
+// "// ==================== ANIVOX INTEGRATION ===================="
+// (саму строку с ANIVOX тоже удали)
 
-const ANIVOX_BASE = '/api/anivox';
-
-export interface AnivoxDubber {
+export interface KodikDub {
   id: number;
   name: string;
-  team?: string;
+  type: 'voice' | 'subtitles' | string;
+  link: string;
+  episodes: Record<string, string> | null;
 }
 
-export interface AnivoxStreamResponse {
-  links: Record<string, string>;
-  skips?: { opening?: number[] | null; ending?: number[] | null };
-  thumbnail?: string | null;
-}
-
-export async function fetchAnivoxDubbers(shikimoriId: number): Promise<AnivoxDubber[]> {
+export async function fetchKodikDubs(shikimoriId: number): Promise<KodikDub[]> {
   try {
-    const resp = await fetch(`${ANIVOX_BASE}/anime/${shikimoriId}?with_dubbers=1`);
+    const resp = await fetch(`/api/kodik?shikimori_id=${shikimoriId}`);
     if (!resp.ok) return [];
-    const data = await resp.json();
-    return (data.translations ?? data.dubbers ?? []) as AnivoxDubber[];
+    return (await resp.json()) as KodikDub[];
   } catch {
     return [];
-  }
-}
-
-export async function fetchAnivoxStream(
-  shikimoriId: number,
-  episode: number,
-  dubberId: number,
-): Promise<AnivoxStreamResponse | null> {
-  try {
-    const url = `${ANIVOX_BASE}/episodes/${shikimoriId}/${episode}?dubber=${dubberId}&room_id=&with_kodik=false`;
-    const resp = await fetch(url);
-    if (!resp.ok) return null;
-    const data = (await resp.json()) as AnivoxStreamResponse;
-    if (data.links) {
-      for (const q of Object.keys(data.links)) {
-        if (data.links[q].startsWith('//')) data.links[q] = 'https:' + data.links[q];
-      }
-    }
-    return data;
-  } catch {
-    return null;
   }
 }
