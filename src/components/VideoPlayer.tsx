@@ -1,92 +1,90 @@
 import { useEffect, useRef, useState } from 'react';
+import Hls from 'hls.js';
 import { Loader2 } from 'lucide-react';
 
 interface VideoPlayerProps {
   src: string | null;
-  /** Меняется при смене серии или аниме. Если сменилась только озвучка, остаётся прежним. */
+  /** Меняется при смене серии или аниме */
   episodeKey: string;
 }
 
-// События плеера Kodik, после которых можно пробовать перемотать
-const SEEK_EVENTS = new Set([
-  'kodik_player_video_started',
-  'kodik_player_play',
-  'kodik_player_duration_update',
-]);
-
-function postSeek(iframe: HTMLIFrameElement | null, seconds: number) {
-  iframe?.contentWindow?.postMessage(
-    { key: 'kodik_player_api', value: { method: 'seek', seconds } },
-    '*',
-  );
-}
-
 export function VideoPlayer({ src, episodeKey }: VideoPlayerProps) {
-  const iframeRef = useRef<HTMLIFrameElement>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const hlsRef = useRef<Hls | null>(null);
+
   const [loaded, setLoaded] = useState(false);
+  const [qualities, setQualities] = useState<{ index: number; height: number }[]>([]);
+  const [currentQuality, setCurrentQuality] = useState<number>(-1);
 
-  const timeRef = useRef(0); // последняя известная секунда просмотра
-  const resumeRef = useRef(0); // куда перемотать новый плеер (0 = не нужно)
-  const attemptsRef = useRef(0);
-  const seenKeys = useRef(new Set<string>());
-
-  // Новая серия или аниме: начинаем с нуля.
-  // Этот эффект должен идти раньше эффекта по src.
+  // При смене серии/тайтла сбрасываем плеер в начало
   useEffect(() => {
-    timeRef.current = 0;
+    if (videoRef.current) {
+      videoRef.current.currentTime = 0;
+    }
   }, [episodeKey]);
 
-  // Новая ссылка: если сменилась только озвучка, запоминаем, откуда продолжить
+  // Основная логика HLS и мгновенной подмены озвучки
   useEffect(() => {
-    setLoaded(false);
-    resumeRef.current = timeRef.current > 3 ? timeRef.current : 0;
-    attemptsRef.current = 0;
-    if (resumeRef.current === 0) return;
-    // Если за 10 секунд перемотка не удалась, сдаёмся
-    const t = window.setTimeout(() => {
-      resumeRef.current = 0;
-    }, 10000);
-    return () => window.clearTimeout(t);
+    if (!src || !videoRef.current) return;
+
+    const video = videoRef.current;
+
+    // Проверяем, прямая ли это HLS (.m3u8) ссылка
+    if (src.includes('.m3u8') || Hls.isSupported()) {
+      setLoaded(false);
+
+      if (!hlsRef.current) {
+        const hls = new Hls({
+          enableWorker: true,
+          maxBufferLength: 20,
+          backBufferLength: 10,
+        });
+
+        hls.attachMedia(video);
+        hlsRef.current = hls;
+
+        hls.on(Hls.Events.MANIFEST_PARSED, (_, data) => {
+          setLoaded(true);
+          const levels = data.levels.map((lvl, index) => ({
+            index,
+            height: lvl.height,
+          }));
+          setQualities(levels);
+        });
+      }
+
+      const hls = hlsRef.current;
+      const currentTime = video.currentTime; // Запоминаем текущую секунду
+      const isPlaying = !video.paused;
+
+      // Мгновенно подменяем источник без пересоздания DOM-элемента
+      hls.loadSource(src);
+
+      const onManifestParsed = () => {
+        if (currentTime > 0) {
+          video.currentTime = currentTime; // Возвращаем воспроизведение на то же место
+        }
+        if (isPlaying) {
+          video.play().catch(() => {});
+        }
+        hls.off(Hls.Events.MANIFEST_PARSED, onManifestParsed);
+      };
+
+      hls.on(Hls.Events.MANIFEST_PARSED, onManifestParsed);
+    }
+
+    return () => {
+      // Экземпляр HLS сохраняется между сменой озвучек
+    };
   }, [src]);
 
-  // Слушаем сообщения от плеера Kodik
-  useEffect(() => {
-    const onMessage = (e: MessageEvent) => {
-      if (e.source !== iframeRef.current?.contentWindow) return;
-      const d = e.data;
-      if (!d || typeof d !== 'object' || typeof d.key !== 'string') return;
-
-      // Для отладки: один раз выводим каждый тип сообщения в консоль
-      if (!seenKeys.current.has(d.key)) {
-        seenKeys.current.add(d.key);
-        console.debug('[kodik]', d.key, d.value);
-      }
-
-      const pending = resumeRef.current;
-
-      if (d.key === 'kodik_player_time_update' && typeof d.value === 'number') {
-        if (pending > 0) {
-          if (d.value >= pending - 2) {
-            resumeRef.current = 0; // перемотка сработала
-          } else if (attemptsRef.current < 8) {
-            attemptsRef.current++;
-            postSeek(iframeRef.current, pending);
-          }
-        } else {
-          timeRef.current = d.value;
-        }
-        return;
-      }
-
-      if (pending > 0 && SEEK_EVENTS.has(d.key) && attemptsRef.current < 8) {
-        attemptsRef.current++;
-        postSeek(iframeRef.current, pending);
-      }
-    };
-
-    window.addEventListener('message', onMessage);
-    return () => window.removeEventListener('message', onMessage);
-  }, []);
+  // Ручное переключение разрешения (1080p, 720p и т.д.)
+  const handleQualityChange = (levelIndex: number) => {
+    if (hlsRef.current) {
+      hlsRef.current.currentLevel = levelIndex; // -1 = Auto
+      setCurrentQuality(levelIndex);
+    }
+  };
 
   if (!src) {
     return (
@@ -96,26 +94,54 @@ export function VideoPlayer({ src, episodeKey }: VideoPlayerProps) {
     );
   }
 
+  // Запасной вариант: если ссылка всё ещё от iframe (фоллбэк)
+  if (!src.includes('.m3u8')) {
+    return (
+      <div className="relative aspect-video w-full overflow-hidden rounded-2xl bg-black ring-1 ring-zinc-800">
+        <iframe
+          src={src}
+          title="Плеер"
+          className="h-full w-full border-0"
+          allow="autoplay *; fullscreen *"
+          allowFullScreen
+        />
+      </div>
+    );
+  }
+
   return (
-    <div className="relative aspect-video w-full overflow-hidden rounded-2xl bg-black ring-1 ring-zinc-800">
+    <div className="relative aspect-video w-full overflow-hidden rounded-2xl bg-black ring-1 ring-zinc-800 group">
       {!loaded && (
         <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center bg-zinc-900/80">
           <Loader2 className="h-8 w-8 animate-spin text-rose-500" />
         </div>
       )}
-      <iframe
-        ref={iframeRef}
-        key={src}
-        src={src}
-        title="Плеер"
-        className="h-full w-full border-0"
-        allow="autoplay *; fullscreen *"
-        allowFullScreen
-        onLoad={() => {
-          setLoaded(true);
-          if (resumeRef.current > 0) postSeek(iframeRef.current, resumeRef.current);
-        }}
+
+      {/* HTML5 Видео-тег (без перезагрузок DOM при смене озвучек) */}
+      <video
+        ref={videoRef}
+        controls
+        className="h-full w-full object-contain"
+        playsInline
       />
+
+      {/* Выбор качества в правом верхнем углу */}
+      {qualities.length > 0 && (
+        <div className="absolute top-4 right-4 z-20 opacity-0 group-hover:opacity-100 transition-opacity">
+          <select
+            value={currentQuality}
+            onChange={(e) => handleQualityChange(Number(e.target.value))}
+            className="bg-black/80 backdrop-blur-md text-white text-xs px-3 py-1.5 rounded-xl border border-zinc-700 outline-none cursor-pointer shadow-lg"
+          >
+            <option value={-1}>Качество: Авто</option>
+            {qualities.map((q) => (
+              <option key={q.index} value={q.index}>
+                {q.height}p
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
     </div>
   );
 }
