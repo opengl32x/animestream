@@ -1,7 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 
-const abs = (link?: string): string => {
-  if (!link) return '';
+const abs = (link: unknown): string => {
+  if (typeof link !== 'string' || !link) return '';
   return link.startsWith('//') ? 'https:' + link : link;
 };
 
@@ -50,7 +50,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const season: any = r.seasons ? Object.values(r.seasons)[0] : null;
       const episodes: Record<string, string> | null = season?.episodes
         ? Object.fromEntries(
-            Object.entries(season.episodes as Record<string, any>).map(([n, e]) => [n, abs(e?.link)]),
+            Object.entries(season.episodes as Record<string, any>).map(([n, e]) => [n, abs(typeof e === 'string' ? e : e?.link)]),
           )
         : null;
 
