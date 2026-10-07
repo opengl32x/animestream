@@ -7,10 +7,8 @@ import {
   fetchCharacters,
   imageUrl,
   ratingBadge,
-  fetchAnivoxDubbers,
-  fetchAnivoxStream,
-  type AnivoxDubber,
-  type AnivoxStreamResponse,
+  fetchKodikDubs,
+  type KodikDub,
 } from '@/lib/api';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/lib/auth-context';
@@ -39,13 +37,11 @@ export function AnimeDetailPage({ animeId }: AnimeDetailPageProps) {
   const [activeScreenshot, setActiveScreenshot] = useState<string | null>(null);
   const [showAllChars, setShowAllChars] = useState(false);
 
-  // ===== ANIVOX PLAYER STATE =====
-  const [dubbers, setDubbers] = useState<AnivoxDubber[]>([]);
-  const [activeDubber, setActiveDubber] = useState<number | null>(null);
-  const [episode, setEpisode] = useState(1);
-  const [stream, setStream] = useState<AnivoxStreamResponse | null>(null);
-  const [streamLoading, setStreamLoading] = useState(false);
-  const [streamError, setStreamError] = useState<string | null>(null);
+  // ===== KODIK PLAYER STATE =====
+  const [dubs, setDubs] = useState<KodikDub[]>([]);
+  const [dubsLoading, setDubsLoading] = useState(true);
+  const [activeDub, setActiveDub] = useState(0); // индекс в массиве dubs
+  const [episode, setEpisode] = useState('1');
 
   // Bookmark state
   const [bookmark, setBookmark] = useState<BookmarkStatus | null>(null);
@@ -83,30 +79,17 @@ export function AnimeDetailPage({ animeId }: AnimeDetailPageProps) {
     load();
   }, [load]);
 
-  // Загружаем список озвучек anivox
+  // Загружаем озвучки и серии из Kodik
   useEffect(() => {
     if (!anime) return;
-    fetchAnivoxDubbers(anime.id).then(list => {
-      setDubbers(list);
-      if (list.length > 0) setActiveDubber(list[0].id);
+    setDubsLoading(true);
+    fetchKodikDubs(anime.id).then(list => {
+      setDubs(list);
+      setActiveDub(0);
+      setEpisode('1');
+      setDubsLoading(false);
     });
   }, [anime]);
-
-  // Загружаем поток при смене озвучки/эпизода
-  useEffect(() => {
-    if (!anime || activeDubber === null) return;
-    setStreamLoading(true);
-    setStreamError(null);
-    setStream(null);
-    fetchAnivoxStream(anime.id, episode, activeDubber).then(s => {
-      if (!s) {
-        setStreamError('Не удалось получить поток для этой озвучки.');
-      } else {
-        setStream(s);
-      }
-      setStreamLoading(false);
-    });
-  }, [anime, activeDubber, episode]);
 
   // Load bookmark
   useEffect(() => {
@@ -256,6 +239,14 @@ export function AnimeDetailPage({ animeId }: AnimeDetailPageProps) {
   const title = anime.russian || anime.name;
   const displayedCharacters = showAllChars ? characters : characters.slice(0, 8);
 
+  // Выбранная озвучка, список её серий и итоговая ссылка для iframe
+  const dub = dubs[activeDub] ?? null;
+  const epKeys = dub?.episodes
+    ? Object.keys(dub.episodes).sort((a, b) => Number(a) - Number(b))
+    : [];
+  const currentEp = epKeys.includes(episode) ? episode : epKeys[0];
+  const playerSrc = dub ? (currentEp && dub.episodes?.[currentEp]) || dub.link : null;
+
   return (
     <div className="mx-auto max-w-7xl px-4 py-6">
       {/* Back */}
@@ -388,34 +379,35 @@ export function AnimeDetailPage({ animeId }: AnimeDetailPageProps) {
         <h2 className="mb-3 text-lg font-bold text-white">Смотреть онлайн</h2>
 
         {/* Выбор озвучки */}
-        {dubbers.length > 0 && (
+        {dubs.length > 0 && (
           <div className="mb-3 flex flex-wrap gap-2">
-            {dubbers.map(d => (
+            {dubs.map((d, i) => (
               <button
-                key={d.id}
-                onClick={() => setActiveDubber(d.id)}
+                key={`${d.id}-${i}`}
+                onClick={() => setActiveDub(i)}
                 className={`rounded-lg px-3 py-1.5 text-xs font-medium transition ${
-                  activeDubber === d.id
+                  activeDub === i
                     ? 'bg-rose-500/20 text-rose-300 ring-1 ring-rose-500/40'
                     : 'bg-zinc-800/60 text-zinc-300 ring-1 ring-zinc-700/50 hover:bg-zinc-700/60'
                 }`}
               >
                 {d.name}
+                {d.type === 'subtitles' ? ' (суб)' : ''}
               </button>
             ))}
           </div>
         )}
 
-        {/* Выбор эпизода */}
-        {anime.episodes > 1 && (
+        {/* Выбор эпизода: берём реальные серии выбранной озвучки */}
+        {epKeys.length > 1 && (
           <div className="mb-3 flex items-center gap-2">
             <label className="text-sm text-zinc-400">Эпизод:</label>
             <select
-              value={episode}
-              onChange={e => setEpisode(Number(e.target.value))}
+              value={currentEp}
+              onChange={e => setEpisode(e.target.value)}
               className="rounded-lg bg-zinc-800/60 px-3 py-1.5 text-sm text-zinc-200 outline-none ring-1 ring-zinc-700/50"
             >
-              {Array.from({ length: anime.episodes }, (_, i) => i + 1).map(n => (
+              {epKeys.map(n => (
                 <option key={n} value={n}>
                   {n}
                 </option>
@@ -424,22 +416,16 @@ export function AnimeDetailPage({ animeId }: AnimeDetailPageProps) {
           </div>
         )}
 
-        {streamError ? (
-          <div className="flex aspect-video w-full items-center justify-center rounded-2xl bg-zinc-900 ring-1 ring-zinc-800">
-            <p className="text-sm text-red-400">{streamError}</p>
-          </div>
-        ) : streamLoading || !stream ? (
+        {dubsLoading ? (
           <div className="flex aspect-video w-full items-center justify-center rounded-2xl bg-zinc-900 ring-1 ring-zinc-800">
             <Loader2 className="h-8 w-8 animate-spin text-rose-500" />
           </div>
+        ) : dubs.length === 0 ? (
+          <div className="flex aspect-video w-full items-center justify-center rounded-2xl bg-zinc-900 ring-1 ring-zinc-800">
+            <p className="text-sm text-zinc-500">Для этого аниме пока нет доступных озвучек.</p>
+          </div>
         ) : (
-          <VideoPlayer stream={stream} poster={imageUrl(anime.image.original)} />
-        )}
-
-        {dubbers.length === 0 && !streamLoading && (
-          <p className="mt-2 text-xs text-zinc-500">
-            Для этого аниме пока нет доступных озвучек.
-          </p>
+          <VideoPlayer src={playerSrc} />
         )}
       </div>
 
