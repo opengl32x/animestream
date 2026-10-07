@@ -425,7 +425,7 @@ export function AnimeDetailPage({ animeId }: AnimeDetailPageProps) {
             <p className="text-sm text-zinc-500">Для этого аниме пока нет доступных озвучек.</p>
           </div>
         ) : (
-          <VideoPlayer src={playerSrc} />
+          <VideoPlayer src={playerSrc} episodeKey={`${anime.id}-${currentEp ?? ''}`} />
         )}
       </div>
 
