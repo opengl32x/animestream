@@ -5,40 +5,6 @@ const abs = (link: unknown): string => {
   return link.startsWith('//') ? 'https:' + link : link;
 };
 
-// Функция расшифровки зашифрованных HLS-ссылок Kodik (ROT13 + Base64)
-function decodeKodikUrl(url: string): string {
-  if (!url) return '';
-  const rot13 = url.replace(/[a-zA-Z]/g, (c) =>
-    String.fromCharCode((c <= 'Z' ? 90 : 122) >= (c = c.charCodeAt(0) + 13) ? c : c - 26)
-  );
-  try {
-    return Buffer.from(rot13, 'base64').toString('utf-8');
-  } catch {
-    return rot13;
-  }
-}
-
-// Извлечение прямой .m3u8 ссылки из HTML-кода плеера Kodik
-async function getDirectHls(iframeUrl: string): Promise<string | null> {
-  try {
-    const res = await fetch(iframeUrl, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        'Referer': 'https://kodik.info/'
-      }
-    });
-    const html = await res.text();
-    const match = html.match(/urlParams\s*=\s*['"]([^'"]+)['"]/);
-    if (match && match[1]) {
-      const decoded = decodeKodikUrl(match[1]);
-      return decoded.startsWith('http') ? decoded : `https:${decoded}`;
-    }
-    return null;
-  } catch {
-    return null;
-  }
-}
-
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const id = String(req.query.shikimori_id ?? '');
   if (!/^\d+$/.test(id)) {
@@ -66,7 +32,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const data = (await upstream.json()) as { results?: any[] };
 
     const seen = new Set<string>();
-    const dubs: any[] = [];
+    const dubs: {
+      id: number;
+      name: string;
+      type: string;
+      link: string;
+      episodes: Record<string, string> | null;
+    }[] = [];
 
     for (const r of data.results ?? []) {
       const tid = r.translation?.id;
@@ -74,17 +46,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (seen.has(key)) continue;
       seen.add(key);
 
-      const iframeLink = abs(r.link);
-      // Достаем прямую hlsUrl ссылку
-      const hlsUrl = await getDirectHls(iframeLink);
-
+      // Для одного shikimori_id берём первый сезон из ответа
       const season: any = r.seasons ? Object.values(r.seasons)[0] : null;
       const episodes: Record<string, string> | null = season?.episodes
         ? Object.fromEntries(
-            Object.entries(season.episodes as Record<string, any>).map(([n, e]) => [
-              n,
-              abs(typeof e === 'string' ? e : e?.link)
-            ]),
+            Object.entries(season.episodes as Record<string, any>).map(([n, e]) => [n, abs(typeof e === 'string' ? e : e?.link)]),
           )
         : null;
 
@@ -92,7 +58,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         id: tid,
         name: r.translation?.title ?? 'Озвучка',
         type: r.translation?.type ?? 'voice',
-        link: hlsUrl || iframeLink, // Ставим HLS-ссылку, если она есть
+        link: abs(r.link),
         episodes,
       });
     }
